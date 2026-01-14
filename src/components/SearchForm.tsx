@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { japaneseAirports, popularDestinations } from '@/lib/airports';
+import { japaneseAirports } from '@/lib/airports';
 
 export default function SearchForm() {
   const router = useRouter();
@@ -74,23 +74,27 @@ export default function SearchForm() {
 
         <div>
           <label htmlFor="destination" className="block text-sm font-medium text-gray-700 mb-1">
-            目的地
+            目的地（空港コード）
           </label>
-          <select
+          <input
+            type="text"
             id="destination"
             name="destination"
             value={formData.destination}
-            onChange={handleChange}
-            className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            onChange={(e) => {
+              const value = e.target.value.toUpperCase().replace(/[^A-Z]/g, '').slice(0, 3);
+              setFormData(prev => ({ ...prev, destination: value }));
+            }}
+            placeholder="例: BKK, SIN, LAX"
+            className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent uppercase"
             required
-          >
-            <option value="">目的地を選択</option>
-            {popularDestinations.map(airport => (
-              <option key={airport.code} value={airport.code}>
-                {airport.city} ({airport.code})
-              </option>
-            ))}
-          </select>
+            pattern="[A-Z]{3}"
+            title="3文字の空港コードを入力してください（例: BKK, SIN, LAX）"
+            maxLength={3}
+          />
+          <p className="text-xs text-gray-500 mt-1">
+            3文字のIATA空港コードを入力（例: BKK=バンコク, SIN=シンガポール, LAX=ロサンゼルス）
+          </p>
         </div>
       </div>
 
