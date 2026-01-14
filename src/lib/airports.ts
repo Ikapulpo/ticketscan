@@ -1,6 +1,10 @@
 import { Airport } from '@/types/flight';
 
+// 東京発着（成田+羽田両方を検索）
+export const TOKYO_COMBINED = 'TYO';
+
 export const japaneseAirports: Airport[] = [
+  { code: 'TYO', name: '成田+羽田（両方検索）', city: '東京' },
   { code: 'NRT', name: '成田国際空港', city: '東京' },
   { code: 'HND', name: '羽田空港', city: '東京' },
   { code: 'KIX', name: '関西国際空港', city: '大阪' },

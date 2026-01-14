@@ -9,8 +9,8 @@ export default function SearchForm() {
   const [isLoading, setIsLoading] = useState(false);
 
   const [formData, setFormData] = useState({
-    origin: 'NRT',
-    destination: '',
+    origin: 'TYO',
+    destinations: [''],
     departureDate: '',
     returnDate: '',
     adults: 2,
@@ -21,9 +21,17 @@ export default function SearchForm() {
     e.preventDefault();
     setIsLoading(true);
 
+    // 有効な目的地のみフィルタ
+    const validDestinations = formData.destinations.filter(d => d.length === 3);
+
+    if (validDestinations.length === 0) {
+      setIsLoading(false);
+      return;
+    }
+
     const params = new URLSearchParams({
       origin: formData.origin,
-      destination: formData.destination,
+      destinations: validDestinations.join(','),
       departureDate: formData.departureDate,
       returnDate: formData.returnDate,
       adults: formData.adults.toString(),
@@ -41,8 +49,37 @@ export default function SearchForm() {
     }));
   };
 
+  const handleDestinationChange = (index: number, value: string) => {
+    const formatted = value.toUpperCase().replace(/[^A-Z]/g, '').slice(0, 3);
+    setFormData(prev => {
+      const newDestinations = [...prev.destinations];
+      newDestinations[index] = formatted;
+      return { ...prev, destinations: newDestinations };
+    });
+  };
+
+  const addDestination = () => {
+    if (formData.destinations.length < 5) {
+      setFormData(prev => ({
+        ...prev,
+        destinations: [...prev.destinations, ''],
+      }));
+    }
+  };
+
+  const removeDestination = (index: number) => {
+    if (formData.destinations.length > 1) {
+      setFormData(prev => ({
+        ...prev,
+        destinations: prev.destinations.filter((_, i) => i !== index),
+      }));
+    }
+  };
+
   // 今日の日付を取得（最小日付として使用）
   const today = new Date().toISOString().split('T')[0];
+
+  const validDestinationCount = formData.destinations.filter(d => d.length === 3).length;
 
   return (
     <form onSubmit={handleSubmit} className="bg-white rounded-xl shadow-lg p-6 max-w-2xl mx-auto">
@@ -50,52 +87,79 @@ export default function SearchForm() {
         航空券検索
       </h2>
 
-      {/* 出発地・目的地 */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-        <div>
-          <label htmlFor="origin" className="block text-sm font-medium text-gray-700 mb-1">
-            出発地
-          </label>
-          <select
-            id="origin"
-            name="origin"
-            value={formData.origin}
-            onChange={handleChange}
-            className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            required
-          >
-            {japaneseAirports.map(airport => (
-              <option key={airport.code} value={airport.code}>
-                {airport.city} ({airport.code}) - {airport.name}
-              </option>
-            ))}
-          </select>
-        </div>
+      {/* 出発地 */}
+      <div className="mb-4">
+        <label htmlFor="origin" className="block text-sm font-medium text-gray-700 mb-1">
+          出発地
+        </label>
+        <select
+          id="origin"
+          name="origin"
+          value={formData.origin}
+          onChange={handleChange}
+          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+          required
+        >
+          {japaneseAirports.map(airport => (
+            <option key={airport.code} value={airport.code}>
+              {airport.city} ({airport.code}) - {airport.name}
+            </option>
+          ))}
+        </select>
+      </div>
 
-        <div>
-          <label htmlFor="destination" className="block text-sm font-medium text-gray-700 mb-1">
-            目的地（空港コード）
-          </label>
-          <input
-            type="text"
-            id="destination"
-            name="destination"
-            value={formData.destination}
-            onChange={(e) => {
-              const value = e.target.value.toUpperCase().replace(/[^A-Z]/g, '').slice(0, 3);
-              setFormData(prev => ({ ...prev, destination: value }));
-            }}
-            placeholder="例: BKK, SIN, LAX"
-            className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent uppercase"
-            required
-            pattern="[A-Z]{3}"
-            title="3文字の空港コードを入力してください（例: BKK, SIN, LAX）"
-            maxLength={3}
-          />
-          <p className="text-xs text-gray-500 mt-1">
-            3文字のIATA空港コードを入力（例: BKK=バンコク, SIN=シンガポール, LAX=ロサンゼルス）
-          </p>
-        </div>
+      {/* 目的地（複数対応） */}
+      <div className="mb-4">
+        <label className="block text-sm font-medium text-gray-700 mb-1">
+          目的地（空港コード）
+          {formData.destinations.length > 1 && (
+            <span className="ml-2 text-blue-600 text-xs">
+              {validDestinationCount}都市を比較
+            </span>
+          )}
+        </label>
+
+        {formData.destinations.map((dest, index) => (
+          <div key={index} className="flex gap-2 mb-2">
+            <input
+              type="text"
+              value={dest}
+              onChange={(e) => handleDestinationChange(index, e.target.value)}
+              placeholder={index === 0 ? "例: BKK" : `目的地${index + 1}`}
+              className="flex-1 px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent uppercase"
+              required={index === 0}
+              pattern="[A-Z]{3}"
+              title="3文字の空港コードを入力してください"
+              maxLength={3}
+            />
+            {formData.destinations.length > 1 && (
+              <button
+                type="button"
+                onClick={() => removeDestination(index)}
+                className="px-3 py-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                title="削除"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            )}
+          </div>
+        ))}
+
+        {formData.destinations.length < 5 && (
+          <button
+            type="button"
+            onClick={addDestination}
+            className="w-full py-2 text-blue-600 hover:bg-blue-50 rounded-lg border border-dashed border-blue-300 transition-colors text-sm"
+          >
+            + 比較する目的地を追加（最大5都市）
+          </button>
+        )}
+
+        <p className="text-xs text-gray-500 mt-2">
+          3文字のIATA空港コードを入力（例: BKK=バンコク, SIN=シンガポール, LAX=ロサンゼルス）
+        </p>
       </div>
 
       {/* 日付 */}
@@ -174,6 +238,7 @@ export default function SearchForm() {
       <div className="bg-blue-50 rounded-lg p-4 mb-6">
         <p className="text-sm text-blue-800">
           <span className="font-medium">検索条件:</span> 大人{formData.adults}人 + 乳児{formData.infants}人
+          {validDestinationCount > 1 && ` / ${validDestinationCount}都市比較`}
         </p>
         <p className="text-xs text-blue-600 mt-1">
           ※ 乳児運賃は大人運賃の約10%で自動計算されます
@@ -183,7 +248,7 @@ export default function SearchForm() {
       {/* 検索ボタン */}
       <button
         type="submit"
-        disabled={isLoading}
+        disabled={isLoading || validDestinationCount === 0}
         className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white font-bold py-4 px-6 rounded-lg transition-colors duration-200"
       >
         {isLoading ? (
@@ -195,7 +260,7 @@ export default function SearchForm() {
             検索中...
           </span>
         ) : (
-          '航空券を検索'
+          validDestinationCount > 1 ? `${validDestinationCount}都市を比較検索` : '航空券を検索'
         )}
       </button>
 

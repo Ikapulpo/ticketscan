@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import SearchForm from '@/components/SearchForm';
 
 export default function Home() {
@@ -13,6 +14,12 @@ export default function Home() {
             家族旅行の航空券を賢く検索。
             サーバーサイド検索でキャッシュによる価格上昇を回避します。
           </p>
+          <Link
+            href="/saved"
+            className="inline-block mt-4 text-blue-600 hover:text-blue-800 text-sm"
+          >
+            保存した検索結果を見る →
+          </Link>
         </div>
 
         {/* 検索フォーム */}

@@ -4,6 +4,7 @@ import { calculateFamilyPrice } from '@/lib/priceCalculator';
 import { searchFlights as searchAmadeus } from '@/lib/amadeus';
 import { searchFlights as searchSkyscanner } from '@/lib/skyscanner';
 import { searchFlights as searchGoogleFlights } from '@/lib/googleFlights';
+import { TOKYO_COMBINED } from '@/lib/airports';
 
 // ランダムなUser-Agentを生成（キャッシュ対策）
 const USER_AGENTS = [
@@ -108,6 +109,50 @@ function generateMockFlights(params: SearchParams): FlightOffer[] {
   );
 }
 
+// 単一の出発地に対して全APIを検索
+async function searchAllApis(params: SearchParams): Promise<{
+  flights: FlightOffer[];
+  sources: { amadeus: boolean; skyscanner: boolean; googleflights: boolean };
+}> {
+  const [amadeusResults, skyscannerResults, googleFlightsResults] = await Promise.allSettled([
+    searchAmadeus(params),
+    searchSkyscanner(params),
+    searchGoogleFlights(params),
+  ]);
+
+  let flights: FlightOffer[] = [];
+
+  if (amadeusResults.status === 'fulfilled') {
+    flights = flights.concat(amadeusResults.value);
+    console.log(`[Search API] Amadeus (${params.origin}): ${amadeusResults.value.length} results`);
+  } else {
+    console.log(`[Search API] Amadeus (${params.origin}) failed:`, amadeusResults.reason);
+  }
+
+  if (skyscannerResults.status === 'fulfilled') {
+    flights = flights.concat(skyscannerResults.value);
+    console.log(`[Search API] Skyscanner (${params.origin}): ${skyscannerResults.value.length} results`);
+  } else {
+    console.log(`[Search API] Skyscanner (${params.origin}) failed:`, skyscannerResults.reason);
+  }
+
+  if (googleFlightsResults.status === 'fulfilled') {
+    flights = flights.concat(googleFlightsResults.value);
+    console.log(`[Search API] Google Flights (${params.origin}): ${googleFlightsResults.value.length} results`);
+  } else {
+    console.log(`[Search API] Google Flights (${params.origin}) failed:`, googleFlightsResults.reason);
+  }
+
+  return {
+    flights,
+    sources: {
+      amadeus: amadeusResults.status === 'fulfilled' && amadeusResults.value.length > 0,
+      skyscanner: skyscannerResults.status === 'fulfilled' && skyscannerResults.value.length > 0,
+      googleflights: googleFlightsResults.status === 'fulfilled' && googleFlightsResults.value.length > 0,
+    },
+  };
+}
+
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
 
@@ -134,35 +179,27 @@ export async function GET(request: NextRequest) {
   console.log(`[Search API] Searching: ${params.origin} -> ${params.destination}`);
 
   try {
-    // 複数のAPIから並行して検索
-    const [amadeusResults, skyscannerResults, googleFlightsResults] = await Promise.allSettled([
-      searchAmadeus(params),
-      searchSkyscanner(params),
-      searchGoogleFlights(params),
-    ]);
-
     let flights: FlightOffer[] = [];
+    let sources = { amadeus: false, skyscanner: false, googleflights: false };
 
-    // 成功した結果を統合
-    if (amadeusResults.status === 'fulfilled') {
-      flights = flights.concat(amadeusResults.value);
-      console.log(`[Search API] Amadeus: ${amadeusResults.value.length} results`);
-    } else {
-      console.log('[Search API] Amadeus failed:', amadeusResults.reason);
-    }
+    // 東京発着（TYO）の場合はNRTとHND両方を検索
+    if (params.origin === TOKYO_COMBINED) {
+      console.log('[Search API] Tokyo combined search: NRT + HND');
+      const [nrtResults, hndResults] = await Promise.all([
+        searchAllApis({ ...params, origin: 'NRT' }),
+        searchAllApis({ ...params, origin: 'HND' }),
+      ]);
 
-    if (skyscannerResults.status === 'fulfilled') {
-      flights = flights.concat(skyscannerResults.value);
-      console.log(`[Search API] Skyscanner: ${skyscannerResults.value.length} results`);
+      flights = [...nrtResults.flights, ...hndResults.flights];
+      sources = {
+        amadeus: nrtResults.sources.amadeus || hndResults.sources.amadeus,
+        skyscanner: nrtResults.sources.skyscanner || hndResults.sources.skyscanner,
+        googleflights: nrtResults.sources.googleflights || hndResults.sources.googleflights,
+      };
     } else {
-      console.log('[Search API] Skyscanner failed:', skyscannerResults.reason);
-    }
-
-    if (googleFlightsResults.status === 'fulfilled') {
-      flights = flights.concat(googleFlightsResults.value);
-      console.log(`[Search API] Google Flights: ${googleFlightsResults.value.length} results`);
-    } else {
-      console.log('[Search API] Google Flights failed:', googleFlightsResults.reason);
+      const result = await searchAllApis(params);
+      flights = result.flights;
+      sources = result.sources;
     }
 
     // APIからの結果がない場合はモックデータを使用
@@ -179,9 +216,7 @@ export async function GET(request: NextRequest) {
       searchedAt: new Date().toISOString(),
       params,
       sources: {
-        amadeus: amadeusResults.status === 'fulfilled' && amadeusResults.value.length > 0,
-        skyscanner: skyscannerResults.status === 'fulfilled' && skyscannerResults.value.length > 0,
-        googleflights: googleFlightsResults.status === 'fulfilled' && googleFlightsResults.value.length > 0,
+        ...sources,
         mock: flights.some(f => f.id.includes('JAL-') || f.id.includes('ANA-')),
       },
     });
