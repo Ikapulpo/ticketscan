@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { FlightOffer, SearchParams } from '@/types/flight';
 import { calculateFamilyPrice } from '@/lib/priceCalculator';
+import { searchFlights as searchAmadeus } from '@/lib/amadeus';
+import { searchFlights as searchSkyscanner } from '@/lib/skyscanner';
 
 // ランダムなUser-Agentを生成（キャッシュ対策）
 const USER_AGENTS = [
@@ -15,7 +17,7 @@ function getRandomUserAgent(): string {
   return USER_AGENTS[Math.floor(Math.random() * USER_AGENTS.length)];
 }
 
-// モックデータを生成（実際のAPI連携までの仮実装）
+// モックデータを生成（APIが設定されていない場合のフォールバック）
 function generateMockFlights(params: SearchParams): FlightOffer[] {
   const airlines = [
     { code: 'JAL', name: '日本航空' },
@@ -126,21 +128,39 @@ export async function GET(request: NextRequest) {
   }
 
   // サーバーサイドでの検索（クライアントのCookieを使わない）
-  // 実際のAPI呼び出し時はここでランダムなUser-Agentを使用
   const userAgent = getRandomUserAgent();
   console.log(`[Search API] Using User-Agent: ${userAgent}`);
   console.log(`[Search API] Searching: ${params.origin} -> ${params.destination}`);
 
   try {
-    // TODO: 実際のAPI連携
-    // const [skyscannerResults, amadeusResults, kiwiResults] = await Promise.all([
-    //   fetchFromSkyscanner(params, userAgent),
-    //   fetchFromAmadeus(params, userAgent),
-    //   fetchFromKiwi(params, userAgent),
-    // ]);
+    // 複数のAPIから並行して検索
+    const [amadeusResults, skyscannerResults] = await Promise.allSettled([
+      searchAmadeus(params),
+      searchSkyscanner(params),
+    ]);
 
-    // 現在はモックデータを返す
-    const flights = generateMockFlights(params);
+    let flights: FlightOffer[] = [];
+
+    // 成功した結果を統合
+    if (amadeusResults.status === 'fulfilled') {
+      flights = flights.concat(amadeusResults.value);
+      console.log(`[Search API] Amadeus: ${amadeusResults.value.length} results`);
+    } else {
+      console.log('[Search API] Amadeus failed:', amadeusResults.reason);
+    }
+
+    if (skyscannerResults.status === 'fulfilled') {
+      flights = flights.concat(skyscannerResults.value);
+      console.log(`[Search API] Skyscanner: ${skyscannerResults.value.length} results`);
+    } else {
+      console.log('[Search API] Skyscanner failed:', skyscannerResults.reason);
+    }
+
+    // APIからの結果がない場合はモックデータを使用
+    if (flights.length === 0) {
+      console.log('[Search API] No API results, using mock data');
+      flights = generateMockFlights(params);
+    }
 
     // 価格順でソート
     flights.sort((a, b) => a.price.total - b.price.total);
@@ -149,6 +169,11 @@ export async function GET(request: NextRequest) {
       offers: flights,
       searchedAt: new Date().toISOString(),
       params,
+      sources: {
+        amadeus: amadeusResults.status === 'fulfilled' && amadeusResults.value.length > 0,
+        skyscanner: skyscannerResults.status === 'fulfilled' && skyscannerResults.value.length > 0,
+        mock: flights.some(f => f.id.includes('JAL-') || f.id.includes('ANA-')),
+      },
     });
   } catch (error) {
     console.error('[Search API] Error:', error);
