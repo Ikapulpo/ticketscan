@@ -3,6 +3,7 @@ import { FlightOffer, SearchParams } from '@/types/flight';
 import { calculateFamilyPrice } from '@/lib/priceCalculator';
 import { searchFlights as searchAmadeus } from '@/lib/amadeus';
 import { searchFlights as searchSkyscanner } from '@/lib/skyscanner';
+import { searchFlights as searchGoogleFlights } from '@/lib/googleFlights';
 
 // ランダムなUser-Agentを生成（キャッシュ対策）
 const USER_AGENTS = [
@@ -134,9 +135,10 @@ export async function GET(request: NextRequest) {
 
   try {
     // 複数のAPIから並行して検索
-    const [amadeusResults, skyscannerResults] = await Promise.allSettled([
+    const [amadeusResults, skyscannerResults, googleFlightsResults] = await Promise.allSettled([
       searchAmadeus(params),
       searchSkyscanner(params),
+      searchGoogleFlights(params),
     ]);
 
     let flights: FlightOffer[] = [];
@@ -156,6 +158,13 @@ export async function GET(request: NextRequest) {
       console.log('[Search API] Skyscanner failed:', skyscannerResults.reason);
     }
 
+    if (googleFlightsResults.status === 'fulfilled') {
+      flights = flights.concat(googleFlightsResults.value);
+      console.log(`[Search API] Google Flights: ${googleFlightsResults.value.length} results`);
+    } else {
+      console.log('[Search API] Google Flights failed:', googleFlightsResults.reason);
+    }
+
     // APIからの結果がない場合はモックデータを使用
     if (flights.length === 0) {
       console.log('[Search API] No API results, using mock data');
@@ -172,6 +181,7 @@ export async function GET(request: NextRequest) {
       sources: {
         amadeus: amadeusResults.status === 'fulfilled' && amadeusResults.value.length > 0,
         skyscanner: skyscannerResults.status === 'fulfilled' && skyscannerResults.value.length > 0,
+        googleflights: googleFlightsResults.status === 'fulfilled' && googleFlightsResults.value.length > 0,
         mock: flights.some(f => f.id.includes('JAL-') || f.id.includes('ANA-')),
       },
     });

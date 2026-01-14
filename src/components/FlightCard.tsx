@@ -14,6 +14,7 @@ export default function FlightCard({ flight, adults, infants }: FlightCardProps)
     skyscanner: { name: 'Skyscanner', color: 'bg-sky-100 text-sky-700' },
     amadeus: { name: 'Amadeus', color: 'bg-orange-100 text-orange-700' },
     kiwi: { name: 'Kiwi', color: 'bg-green-100 text-green-700' },
+    googleflights: { name: 'Google Flights', color: 'bg-blue-100 text-blue-700' },
   };
 
   const sourceInfo = sourceLabels[flight.source] || { name: flight.source, color: 'bg-gray-100 text-gray-700' };

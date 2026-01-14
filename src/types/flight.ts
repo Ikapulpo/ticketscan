@@ -29,7 +29,7 @@ export interface FlightSegment {
 
 export interface FlightOffer {
   id: string;
-  source: 'skyscanner' | 'amadeus' | 'kiwi';
+  source: 'skyscanner' | 'amadeus' | 'kiwi' | 'googleflights';
   price: {
     adult: number;
     infant: number;
