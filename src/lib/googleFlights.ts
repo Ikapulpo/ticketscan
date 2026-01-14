@@ -1,51 +1,49 @@
 import { FlightOffer, SearchParams, FlightSegment } from '@/types/flight';
 import { calculateFamilyPrice } from './priceCalculator';
 
-// RapidAPI経由のGoogle Flights Scraper
+// RapidAPI経由のGoogle Flights Scraper (Flights Scraper Data)
 const RAPIDAPI_KEY = process.env.RAPIDAPI_KEY || '';
 const RAPIDAPI_HOST = 'flights-scraper-data.p.rapidapi.com';
 
-interface GoogleFlightSegment {
-  departure_airport: {
-    id: string;
-    name: string;
-    time: string;
-  };
-  arrival_airport: {
-    id: string;
-    name: string;
-    time: string;
-  };
+// APIレスポンスの型定義
+interface FlightSegmentData {
+  departureAirportCode: string;
+  departureAirportName: string;
+  arrivalAirportCode: string;
+  arrivalAirportName: string;
+  departureTime: string;
+  arrivalTime: string;
+  departureDate: string;
+  arrivalDate: string;
+  airlineCode: string;
+  airlineName: string;
+  flightNumber: string;
   duration: number;
-  flight_number: string;
-  airline: string;
-  airline_logo: string;
-  travel_class: string;
-  legroom: string;
-  extensions: string[];
 }
 
-interface GoogleFlightResult {
-  flights: GoogleFlightSegment[][];
-  total_duration: number;
+interface FlightData {
+  airlineCode: string;
+  airlineName: string;
+  departureAirport: string;
+  arrivalAirport: string;
+  departureDate: string;
+  arrivalDate: string;
+  departureTime: string;
+  arrivalTime: string;
+  durationMinutes: number;
+  stops: number;
   price: number;
-  type: string;
-  airline_logo: string;
-  departure_token?: string;
-  extensions?: string[];
-  layovers?: Array<{
-    duration: number;
-    name: string;
-    id: string;
-  }>;
+  segments: FlightSegmentData[];
 }
 
-interface GoogleFlightsResponse {
+interface ApiResponse {
   status: boolean;
+  status_code: number;
   data: {
-    best_flights?: GoogleFlightResult[];
-    other_flights?: GoogleFlightResult[];
-  };
+    topFlights?: FlightData[];
+    otherFlights?: FlightData[];
+  } | null;
+  message?: string;
 }
 
 function formatDuration(minutes: number): string {
@@ -54,29 +52,18 @@ function formatDuration(minutes: number): string {
   return `${hours}h ${mins}m`;
 }
 
-function formatTime(isoTime: string): string {
-  // 2024-01-15 10:30 or 2024-01-15T10:30:00
-  const date = new Date(isoTime);
-  if (isNaN(date.getTime())) {
-    // フォールバック: 時間部分だけ抽出
-    const match = isoTime.match(/(\d{1,2}:\d{2})/);
-    return match ? match[1] : isoTime;
-  }
-  return date.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
-}
-
-function convertSegments(segments: GoogleFlightSegment[]): FlightSegment[] {
+function convertSegments(segments: FlightSegmentData[]): FlightSegment[] {
   return segments.map((seg): FlightSegment => ({
     departure: {
-      airport: seg.departure_airport.id,
-      time: formatTime(seg.departure_airport.time),
+      airport: seg.departureAirportCode,
+      time: seg.departureTime,
     },
     arrival: {
-      airport: seg.arrival_airport.id,
-      time: formatTime(seg.arrival_airport.time),
+      airport: seg.arrivalAirportCode,
+      time: seg.arrivalTime,
     },
-    airline: seg.airline,
-    flightNumber: seg.flight_number,
+    airline: seg.airlineName,
+    flightNumber: `${seg.airlineCode}${seg.flightNumber}`,
     duration: formatDuration(seg.duration),
   }));
 }
@@ -88,78 +75,82 @@ export async function searchFlights(params: SearchParams): Promise<FlightOffer[]
   }
 
   try {
-    // 往路検索
-    const outboundUrl = new URL(`https://${RAPIDAPI_HOST}/flights/search-one-way`);
-    outboundUrl.searchParams.set('origin', params.origin);
-    outboundUrl.searchParams.set('destination', params.destination);
-    outboundUrl.searchParams.set('date', params.departureDate);
-    outboundUrl.searchParams.set('adults', params.adults.toString());
-    outboundUrl.searchParams.set('children', '0');
-    outboundUrl.searchParams.set('infants_in_seat', '0');
-    outboundUrl.searchParams.set('infants_on_lap', params.infants.toString());
-    outboundUrl.searchParams.set('currency', 'JPY');
-
     const headers = {
       'X-RapidAPI-Key': RAPIDAPI_KEY,
       'X-RapidAPI-Host': RAPIDAPI_HOST,
     };
 
-    console.log(`[GoogleFlights] Searching: ${params.origin} -> ${params.destination}`);
+    // 往路検索
+    const outboundUrl = new URL(`https://${RAPIDAPI_HOST}/flights/search-oneway`);
+    outboundUrl.searchParams.set('departureId', params.origin);
+    outboundUrl.searchParams.set('arrivalId', params.destination);
+    outboundUrl.searchParams.set('departureDate', params.departureDate);
+    outboundUrl.searchParams.set('adults', params.adults.toString());
+    if (params.infants > 0) {
+      outboundUrl.searchParams.set('infants', params.infants.toString());
+    }
+    outboundUrl.searchParams.set('currency', 'JPY');
+
+    console.log(`[GoogleFlights] Searching outbound: ${params.origin} -> ${params.destination}`);
 
     const outboundResponse = await fetch(outboundUrl.toString(), { headers });
 
     if (!outboundResponse.ok) {
-      console.error('[GoogleFlights] API error:', outboundResponse.status);
+      console.error('[GoogleFlights] Outbound API error:', outboundResponse.status);
       return [];
     }
 
-    const outboundData: GoogleFlightsResponse = await outboundResponse.json();
+    const outboundData: ApiResponse = await outboundResponse.json();
 
     if (!outboundData.status || !outboundData.data) {
-      console.log('[GoogleFlights] No results');
+      console.log('[GoogleFlights] Outbound: No results or error -', outboundData.message);
       return [];
     }
 
     // 往路の結果を取得
-    const allFlights = [
-      ...(outboundData.data.best_flights || []),
-      ...(outboundData.data.other_flights || []),
+    const outboundFlights = [
+      ...(outboundData.data.topFlights || []),
+      ...(outboundData.data.otherFlights || []),
     ];
 
+    console.log(`[GoogleFlights] Outbound: ${outboundFlights.length} flights found`);
+
     // 復路検索
-    const returnUrl = new URL(`https://${RAPIDAPI_HOST}/flights/search-one-way`);
-    returnUrl.searchParams.set('origin', params.destination);
-    returnUrl.searchParams.set('destination', params.origin);
-    returnUrl.searchParams.set('date', params.returnDate);
+    const returnUrl = new URL(`https://${RAPIDAPI_HOST}/flights/search-oneway`);
+    returnUrl.searchParams.set('departureId', params.destination);
+    returnUrl.searchParams.set('arrivalId', params.origin);
+    returnUrl.searchParams.set('departureDate', params.returnDate);
     returnUrl.searchParams.set('adults', params.adults.toString());
-    returnUrl.searchParams.set('children', '0');
-    returnUrl.searchParams.set('infants_in_seat', '0');
-    returnUrl.searchParams.set('infants_on_lap', params.infants.toString());
+    if (params.infants > 0) {
+      returnUrl.searchParams.set('infants', params.infants.toString());
+    }
     returnUrl.searchParams.set('currency', 'JPY');
 
+    console.log(`[GoogleFlights] Searching return: ${params.destination} -> ${params.origin}`);
+
     const returnResponse = await fetch(returnUrl.toString(), { headers });
-    let returnFlights: GoogleFlightResult[] = [];
+    let returnFlights: FlightData[] = [];
 
     if (returnResponse.ok) {
-      const returnData: GoogleFlightsResponse = await returnResponse.json();
+      const returnData: ApiResponse = await returnResponse.json();
       if (returnData.status && returnData.data) {
         returnFlights = [
-          ...(returnData.data.best_flights || []),
-          ...(returnData.data.other_flights || []),
+          ...(returnData.data.topFlights || []),
+          ...(returnData.data.otherFlights || []),
         ];
+        console.log(`[GoogleFlights] Return: ${returnFlights.length} flights found`);
       }
     }
 
     // 往路と復路を組み合わせてオファーを作成
     const offers: FlightOffer[] = [];
 
-    for (let i = 0; i < Math.min(allFlights.length, 15); i++) {
-      const outbound = allFlights[i];
-      const inbound = returnFlights[i % returnFlights.length] || returnFlights[0];
+    for (let i = 0; i < Math.min(outboundFlights.length, 10); i++) {
+      const outbound = outboundFlights[i];
+      // 復路がある場合は対応するフライトを選択、なければ往路のみ
+      const inbound = returnFlights[i % Math.max(returnFlights.length, 1)] || null;
 
-      if (!outbound) continue;
-
-      // 往路の価格 + 復路の価格（ある場合）
+      // 往路の価格 + 復路の価格
       const outboundPrice = outbound.price || 0;
       const inboundPrice = inbound?.price || outboundPrice;
       const totalAdultPrice = outboundPrice + inboundPrice;
@@ -168,13 +159,9 @@ export async function searchFlights(params: SearchParams): Promise<FlightOffer[]
         totalAdultPrice,
         params.adults,
         params.infants,
-        'JPY'
+        'JPY',
+        outbound.airlineCode
       );
-
-      const outboundSegments = outbound.flights?.[0] || [];
-      const inboundSegments = inbound?.flights?.[0] || [];
-
-      const airline = outboundSegments[0]?.airline || 'Unknown';
 
       offers.push({
         id: `googleflights-${i}-${Date.now()}`,
@@ -185,16 +172,16 @@ export async function searchFlights(params: SearchParams): Promise<FlightOffer[]
           total: priceBreakdown.grandTotal,
           currency: 'JPY',
         },
-        outbound: convertSegments(outboundSegments),
-        inbound: convertSegments(inboundSegments),
-        airline,
-        stops: Math.max(0, outboundSegments.length - 1),
-        duration: formatDuration(outbound.total_duration || 0),
-        bookingUrl: undefined, // Google Flightsは直接予約URLを提供しない
+        outbound: convertSegments(outbound.segments || []),
+        inbound: inbound ? convertSegments(inbound.segments || []) : [],
+        airline: outbound.airlineName,
+        stops: outbound.stops,
+        duration: formatDuration(outbound.durationMinutes),
+        bookingUrl: undefined,
       });
     }
 
-    console.log(`[GoogleFlights] Found ${offers.length} offers`);
+    console.log(`[GoogleFlights] Total offers created: ${offers.length}`);
     return offers;
   } catch (error) {
     console.error('[GoogleFlights] Search error:', error);
